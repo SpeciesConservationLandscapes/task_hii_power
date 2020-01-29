@@ -1,4 +1,6 @@
+import argparse 
 import ee
+from datetime import datetime, timezone
 from task_base import EETask
 
 
@@ -22,56 +24,23 @@ class HIIPower(EETask):
         "ocean": {
             "ee_type": EETask.IMAGE,
             "ee_path": "users/aduncan/cci/ESACCI-LC-L4-WB-Ocean-Map-150m-P13Y-2000-v40",
+        },
+        "watermask": {
+            "ee_type": EETask.IMAGE,
+            "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
         }
-    }
+            }
     
-
-
-
-
-
     gpw_cadence = 5
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.set_aoi_from_ee("{}/sumatra_poc_aoi".format(self.ee_rootdir))
 
-
-
-
-
-
-    def square(x):
-      square = x * x
-      return square
-
-    test1 = 'test1'
-
-    def something(self):
-      something_else = self.test1
-      return something_else
-
     def calc(self):
-        #print(self.test1) # works
-        #print(self.something()) # works
 
+        watermask = ee.Image(self.inputs['watermask']['ee_path'])
         viirs = ee.ImageCollection(self.inputs['viirs']['ee_path'])
-
         polar = ee.Feature(ee.FeatureCollection('projects/HII/v1/misc/polar_for_viirs_correction').first())
 
         viirs_polar_correction = ee.FeatureCollection([polar.set({'foo':1})]).reduceToImage(['foo'], ee.Reducer.sum())
@@ -96,18 +65,6 @@ class HIIPower(EETask):
         def reproject_dmsp(image):
             return image.reproject(crs='EPSG:4326',scale=300)
 
-        #print(viirs_func(2015)) #works
-
-
-        caspian = ee.FeatureCollection(self.inputs['caspian']['ee_path'])
-
-        jrc = ee.Image(self.inputs['jrc']['ee_path'])\
-                        .select('occurrence')\
-                        .lte(75)\
-                        .unmask(1)\
-                        .multiply(ee.Image(0).clip(caspian).unmask(1))
-
-        ocean = ee.Image(self.inputs['ocean']['ee_path'])
  
 
         dmsp_1992 = ee.Image('users/aduncan/yale/F101992')
@@ -210,23 +167,13 @@ class HIIPower(EETask):
                     ]).map(reproject_dmsp)
   
         # NEED TO SORT DESCENDING!!! This was a map but don't need right now...
-        combined = dmsp_ic.merge(viirs_ic).first().unmask(0)\
-                                                    .multiply(0.01)\
-                                                    .updateMask(jrc)\
-                                                    .updateMask(ocean)
+        ee_taskdate = ee.Date(self.taskdate.strftime(self.DATE_FORMAT))
+        year_num = ee.Number(ee_taskdate.get('year')).subtract(1992)
 
+        hii_power_oneyear = ee.Image(dmsp_ic.merge(viirs_ic).toList(30).get(year_num))
 
-
-
-
-
-
-
-
-
-
-
-        self.export_image_ee(combined, '{}/{}'.format(self.ee_driverdir, 'hii_power_driver'))
+        hii_power_driver = hii_power_oneyear.unmask(0).multiply(0.01).updateMask(watermask)
+        self.export_image_ee(hii_power_driver, '{}/{}'.format(self.ee_driverdir, 'hii_power_driver'))
 
     def check_inputs(self):
         super().check_inputs()
@@ -234,5 +181,8 @@ class HIIPower(EETask):
 
 
 if __name__ == "__main__":
-    power_task = HIIPower()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-d', '--taskdate', default=datetime.now(timezone.utc).date())
+    options = parser.parse_args()
+    power_task = HIIPower(**vars(options))
     power_task.run()
