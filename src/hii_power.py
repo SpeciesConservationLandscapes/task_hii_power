@@ -172,7 +172,7 @@ class HIIPower(EETask):
 
         hii_power_oneyear = ee.Image(dmsp_ic.merge(viirs_ic).toList(30).get(year_num))
 
-        hii_power_driver = hii_power_oneyear.unmask(0).multiply(0.01).updateMask(watermask)
+        hii_power_driver = hii_power_oneyear.unmask(0).multiply(0.01).updateMask(watermask).multiply(10)
         self.export_image_ee(hii_power_driver, '{}/{}'.format(self.ee_driverdir, 'hii_power_driver'))
 
     def check_inputs(self):
