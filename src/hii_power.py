@@ -34,7 +34,7 @@ class HIIPower(EETask):
         )
 
         # TODO: add property to source fc to avoid this step (and "foo"). Also, better to use server-side List()
-        # instead of python list as argument to FeatureCollection()?
+        #  instead of python list as argument to FeatureCollection()?
         viirs_polar_correction = ee.FeatureCollection(
             [polar.set({"foo": 1})]
         ).reduceToImage(["foo"], ee.Reducer.sum())
@@ -62,11 +62,11 @@ class HIIPower(EETask):
             return image.reproject(crs=self.crs, scale=self.scale)
 
         # TODO: These should be moved into an image collection, added to self.inputs, and attributed
-        # with system:time_start and a maxage property = 1.
-        # Then merge this dmsp ic with the viirs ic, refactor code to use self.get_most_recent_image()
-        # So most recent year (DMSP) or most recent month (VIIRS), and then we don't have to
-        # run viirs_func over all viirs images, and in fact can avoid that median step altogether
-        # (unless we want to use the median from one time point to either side?)
+        #  with system:time_start and a maxage property = 1.
+        #  Then merge this dmsp ic with the viirs ic, refactor code to use self.get_most_recent_image()
+        #  So most recent year (DMSP) or most recent month (VIIRS), and then we don't have to
+        #  run viirs_func over all viirs images, and in fact can avoid that median step altogether
+        #  (unless we want to use the median from one time point to either side?)
         dmsp_1992 = ee.Image("users/aduncan/yale/F101992")
         dmsp_1993 = ee.Image("users/aduncan/yale/F101993")
         dmsp_1994 = ee.ImageCollection(
