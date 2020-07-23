@@ -12,10 +12,12 @@ class HIIPower(EETask):
         "watermask": {
             "ee_type": EETask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
+            "static": True,
         },
         "dmsp_viirs_merged": {
             "ee_type": EETask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_merged",
+            "maxage":3
         },
 
     }
