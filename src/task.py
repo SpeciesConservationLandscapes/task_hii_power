@@ -1,52 +1,66 @@
 import argparse
 import ee
-from datetime import datetime, timezone
+from datetime import datetime
 from task_base import HIITask
 
 
 class HIIPower(HIITask):
-    ee_rootdir = "projects/HII/v1"
-    ee_driverdir = "driver/power"
+    DMSP_ERA = datetime(2013, 1, 1)
+    scale = 300
     inputs = {
+        "dmsp_viirs_calibrated": {
+            "ee_type": HIITask.IMAGECOLLECTION,
+            "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated",
+            "maxage": 1,
+        },
+        "viirs": {
+            "ee_type": HIITask.IMAGECOLLECTION,
+            "ee_path": "NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG",
+            "maxage": 2,
+        },
         "watermask": {
             "ee_type": HIITask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
             "static": True,
         },
-        "dmsp_viirs_merged": {
-            "ee_type": HIITask.IMAGECOLLECTION,
-            "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_merged",
-            "maxage": 3,
-        },
     }
-    scale = 300
-    gpw_cadence = 5
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.realm = kwargs.pop("realm", None)
-        self.set_aoi_from_ee("projects/HII/v1/source/realms/" + self.realm)
+        self.dmsp_viirs_calibrated = ee.ImageCollection(
+            self.inputs["dmsp_viirs_calibrated"]["ee_path"]
+        )
+        self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
+        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
+        self.nightlights = None
+        self.nightlights_date = None
+
+    def populate_nightlights(self):
+        ee_taskdate = ee.Date(self.taskdate.strftime(self.DATE_FORMAT))
+        self.nightlights, self.nightlights_date = self.get_most_recent_image(
+            self.dmsp_viirs_calibrated
+        )
+        age = ee_taskdate.difference(self.nightlights_date, "year").getInfo()
+        if age > self.inputs["dmsp_viirs_calibrated"]["maxage"]:
+            # export viirs images here and set self.nightlights, self.nightlights_date
+            self.wait()
 
     def calc(self):
-        nightlights, nightlights_date = self.get_most_recent_image(
-            ee.ImageCollection(self.inputs["dmsp_viirs_merged"]["ee_path"])
-        )
-        watermask = ee.Image(self.inputs["watermask"]["ee_path"])
+        self.populate_nightlights()
+        # use self.nightlights to create driver
 
-        # Adam TODO question: Should I just find the julian day, divide by 365, and use that to find a date's value between two 01-01s?
-        hii_power_driver = nightlights.multiply(0.01).updateMask(watermask)
-        self.export_image_ee(
-            hii_power_driver, "{}/{}".format(self.ee_driverdir, "aois/" + self.realm)
-        )
+        # hii_power_driver = nightlights.multiply(0.01).updateMask(self.watermask)
+        # self.export_image_ee(
+        #     hii_power_driver, f"driver/power"
+        # )
 
     def check_inputs(self):
-        super().check_inputs()
-        # add any task-specific checks here, and set self.status = self.FAILED if any fail
+        if self.taskdate < self.DMSP_ERA:
+            super().check_inputs()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-r", "--realm", default="Afrotropic")
     parser.add_argument("-d", "--taskdate")
     parser.add_argument(
         "--overwrite",
