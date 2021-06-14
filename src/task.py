@@ -5,18 +5,13 @@ from task_base import HIITask
 
 
 class HIIPower(HIITask):
-    DMSP_ERA = datetime(2013, 1, 1)
     scale = 300
+
     inputs = {
         "dmsp_viirs_calibrated": {
             "ee_type": HIITask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated",
             "maxage": 1,
-        },
-        "viirs": {
-            "ee_type": HIITask.IMAGECOLLECTION,
-            "ee_path": "NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG",
-            "maxage": 2,
         },
         "watermask": {
             "ee_type": HIITask.IMAGE,
@@ -24,39 +19,60 @@ class HIIPower(HIITask):
             "static": True,
         },
     }
+    quintiles = {
+        "0": {"value": 0, "min": 0, "max": 0},
+        "1": {"value": 1, "min": 1, "max": 4},
+        "2": {"value": 2, "min": 5, "max": 5},
+        "3": {"value": 3, "min": 6, "max": 6},
+        "4": {"value": 4, "min": 7, "max": 7},
+        "5": {"value": 5, "min": 8, "max": 9},
+        "6": {"value": 6, "min": 10, "max": 11},
+        "7": {"value": 7, "min": 12, "max": 16},
+        "8": {"value": 8, "min": 17, "max": 30},
+        "9": {"value": 9, "min": 31, "max": 62},
+        "10": {"value": 10, "min": 63, "max": 63},
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.dmsp_viirs_calibrated = ee.ImageCollection(
-            self.inputs["dmsp_viirs_calibrated"]["ee_path"]
+        self.nightlights, _ = self.get_most_recent_image(
+            ee.ImageCollection(self.inputs["dmsp_viirs_calibrated"]["ee_path"])
         )
-        self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
-        self.nightlights = None
-        self.nightlights_date = None
+        self.quintiles = ee.Dictionary(self.quintiles)
 
-    def populate_nightlights(self):
-        ee_taskdate = ee.Date(self.taskdate.strftime(self.DATE_FORMAT))
-        self.nightlights, self.nightlights_date = self.get_most_recent_image(
-            self.dmsp_viirs_calibrated
-        )
-        age = ee_taskdate.difference(self.nightlights_date, "year").getInfo()
-        if age > self.inputs["dmsp_viirs_calibrated"]["maxage"]:
-            # export viirs images here and set self.nightlights, self.nightlights_date
-            self.wait()
+    # TODO: add code for calculating regression coeffecients used in callibration
+    # TODO: add code for exporting callibrated nightlights, including noise correction for 2013 - current
+    # TODO: include method for checking if nightlight image is available and export if not
 
     def calc(self):
-        self.populate_nightlights()
-        # use self.nightlights to create driver
+        def power_classify(value):
+            bin = ee.Dictionary(self.quintiles.get(value))
+            power_value = ee.Number(bin.get("value"))
+            min = ee.Number(bin.get("min"))
+            max = ee.Number(bin.get("max"))
+            return (
+                self.nightlights.gte(min)
+                .And(self.nightlights.lte(max))
+                .selfMask()
+                .multiply(power_value)
+                .unmask(0)
+                .int()
+            )
 
-        # hii_power_driver = nightlights.multiply(0.01).updateMask(self.watermask)
-        # self.export_image_ee(
-        #     hii_power_driver, f"driver/power"
-        # )
+        hii_power_driver = (
+            ee.ImageCollection(self.quintiles.keys().map(power_classify))
+            .reduce(ee.Reducer.sum())
+            .updateMask(self.watermask)
+            .multiply(100)
+            .int()
+            .rename("hii_power_driver")
+        )
+
+        self.export_image_ee(hii_power_driver, f"driver/power")
 
     def check_inputs(self):
-        if self.taskdate < self.DMSP_ERA:
-            super().check_inputs()
+        super().check_inputs()
 
 
 if __name__ == "__main__":
