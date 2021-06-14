@@ -62,14 +62,14 @@ class HIIPower(HIITask):
 
         hii_power_driver = (
             ee.ImageCollection(self.quintiles.keys().map(power_classify))
-            .reduce(ee.Reducer.sum())
+            .reduce(ee.Reducer.max())
             .updateMask(self.watermask)
             .multiply(100)
             .int()
             .rename("hii_power_driver")
         )
 
-        self.export_image_ee(hii_power_driver, f"driver/power")
+        self.export_image_ee(hii_power_driver, "driver/power")
 
     def check_inputs(self):
         super().check_inputs()
