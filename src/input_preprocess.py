@@ -177,35 +177,9 @@ class HII_Power_Input_Processing(HIITask):
             dmsp_projection,
             self.watermask,
         )
-
+        # TODO: add the export for the calibrated viirs
         #   var exportString = exportYear.toString();
         #   var id = 'projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_' + exportString + '_calDMSP';
-        #
-        #   var description = 'Harmonized_DN_NTL_' + exportString + '_calDMSP';
-        #
-        #   var dmsp_latest = li_et_al.filterDate('2012', '2013').first()
-        #     // .updateMask(watermask)
-        #     .rename('DMSP');
-        #   // Map.addLayer(dmsp_latest)
-        #   var dmsp_1992 = li_et_al.filterDate('1992', '1993').first()
-        #     .updateMask(watermask)
-        #     .selfMask()
-        #     .rename('DMSP');
-        #   dmsp_1992 = dmsp_1992.updateMask(dmsp_1992.gt(1));
-        #
-        #   var viirs_callibrated =  annual_viirs(viirs, year, false)//.select(0)
-        #   if (exportYear == 2013) {
-        #     var date = ee.Date.parse('YYYY', '2013').millis()
-        #     viirs_callibrated = viirs_callibrated.add(dmsp_latest)
-        #       .divide(2)
-        #       .round()
-        #       .uint8()
-        #       .set({'system:time_start': date})
-        #   } else {
-        #     viirs_callibrated = viirs_callibrated
-        #   }
-        # }
-
         # self.export_image_ee(hii_power_driver, "driver/power")
 
     def check_inputs(self):
