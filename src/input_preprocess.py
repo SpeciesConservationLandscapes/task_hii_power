@@ -93,7 +93,12 @@ class HII_Power_Input_Processing(HIITask):
         return dmsp_stable
 
     def stable_light_points(
-        self, dmsp_collection, viirs_collection, stable_lights_image, watermask
+        self,
+        dmsp_collection,
+        viirs_collection,
+        stable_lights_image,
+        watermask,
+        geometry,
     ):
         dmsp_latest = dmsp_collection.filterDate("2012", "2013").first()
         dmsp_stable = (
@@ -120,15 +125,10 @@ class HII_Power_Input_Processing(HIITask):
         dmsp_class = dmsp_stable.round().int().rename("NL_CLASS")
         regression_image = dmsp_class.addBands([dmsp_stable, viirs_earliest])
 
-        # TODO: global bounds?
-        gBounds = ee.Geometry.Polygon(
-            [-180, 88, 0, 88, 180, 88, 180, -88, 0, -88, -180, -88], None, False
-        )
-
         regression_sample = regression_image.stratifiedSample(
             numPoints=5,
             classBand="NL_CLASS",
-            region=gBounds,
+            region=geometry,
             scale=self.scale,
             projection=self.crs,
             tileScale=16,
@@ -159,14 +159,36 @@ class HII_Power_Input_Processing(HIITask):
         )
         return annual_viirs
 
+    def quantile_calc(self, image_collection, year, geometry):
+        year_int = ee.Number(year).int()
+        year_str = year_int.format("%d")
+        start_date = ee.Date.parse("YYYY", year_str)
+        end_date = start_date.advance(1, "year")
+
+        nighlights_year = image_collection.filterDate(start_date, end_date).first()
+
+        nightlight_quantiles = nighlights_year.reduceRegion(
+            reducer=ee.Reducer.percentile([10, 20, 30, 40, 50, 60, 70, 80, 90]),
+            geometry=geometry,
+            scale=500,
+            maxPixels=1e13,
+            tileScale=16,
+        )
+
+        return nightlight_quantiles
+
     def calc(self):
         viirs_projection = self.viirs.first().projection()
         dmsp_projection = self.dmsp.first().projection()
-
+        # TODO: global bounds?
+        global_bounds = ee.Geometry.Polygon(
+            [-180, 88, 0, 88, 180, 88, 180, -88, 0, -88, -180, -88], None, False
+        )
         stable_lights = self.stable_lights_image(self.dmsp, 2)
         regression_points = self.stable_light_points(
-            self.dmsp, self.viirs, stable_lights, self.watermask
+            self.dmsp, self.viirs, stable_lights, self.watermask, global_bounds
         )
+
         # TODO: export the regression sample for analysis
         # export to GCS as CSV and then bring back in to run regression in this task?
 
@@ -181,6 +203,9 @@ class HII_Power_Input_Processing(HIITask):
         #   var exportString = exportYear.toString();
         #   var id = 'projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_' + exportString + '_calDMSP';
         # self.export_image_ee(hii_power_driver, "driver/power")
+
+        quantiles = self.quantile_calc(self.dmsp, 1992, global_bounds)
+        print(quantiles.getInfo())
 
     def check_inputs(self):
         super().check_inputs()
