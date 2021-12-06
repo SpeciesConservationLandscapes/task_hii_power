@@ -23,7 +23,7 @@ This task calculates the (unitless) "influence" of power on the terrestrial surf
 ### Input Dataset Calibration
 The HII power driver (0-10) is calculated from the previous calendar year's calibrated nightlights dataset, which is produced on demand by the task. Two distinct source nightlight datasets are used to calculate this calibrated version following the methods below; these are the Defense Meteorological Satellite Program (DMSP)/Operational Linescan System (OLS) and the Visible Infrared Imaging Radiometry Suite (VIIRS) on the Suomi National Polar-orbiting Partnership Satellite. DMSP provides data from 1992 - 2013 and VIIRS provides data from 2012 through the present.
 
-Inconsistencies within the DMSP time series require implementing intra-calibration within the DMPSP dataset. Here the intra-calibrated dataset produced by [Li et al. 2020](https://www.nature.com/articles/s41597-020-0510-y) is used. Key differences between the DMSP and VIIRS datasets also require inter-calibration of the two datasets. In addition to the calibration process to match VIIRS to DMSP, VIIRS requires substantial noise reduction. These key differences are:
+Inconsistencies within the DMSP time series require implementing intra-calibration within the DMSP dataset. Here the intra-calibrated dataset produced by [Li et al. 2020](https://www.nature.com/articles/s41597-020-0510-y) is used. Key differences between the DMSP and VIIRS datasets also require inter-calibration of the two datasets. In addition to the calibration process to match VIIRS to DMSP, VIIRS requires substantial noise reduction. These key differences are:
 
 | Description | DMSP | VIIRS | Calibrated |
 | :--- | :--- | :--- | :--- |
