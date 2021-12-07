@@ -1,12 +1,20 @@
 import argparse
 import ee
-from datetime import datetime
+import os
 from task_base import HIITask
 
 
-class HII_Power_Input_Processing(HIITask):
-    scale = 300
+CALC_PREVIOUS_ANNUAL_VIIRS = "viirs"
+CALC_CALIBRATION_COEFFICIENTS = "coefficients"
+CALC_WEIGHTING_QUANTILES = "quantiles"
+JOB_CHOICES = (
+    CALC_PREVIOUS_ANNUAL_VIIRS,
+    CALC_CALIBRATION_COEFFICIENTS,
+    CALC_WEIGHTING_QUANTILES,
+)
 
+
+class HIIPowerPreprocessTask(HIITask):
     inputs = {
         "dmsp_viirs_calibrated": {
             "ee_type": HIITask.IMAGECOLLECTION,
@@ -26,7 +34,7 @@ class HII_Power_Input_Processing(HIITask):
     }
 
     thresholds = {
-        "latitude": {"min_lat": 0, "min_val": 0.1, "max_lat": 60, "max_val": 0.75,},
+        "latitude": {"min_lat": 0, "min_val": 0.1, "max_lat": 60, "max_val": 0.75},
     }
     calibration_coefficients = {
         "slope": 10.53,
@@ -35,21 +43,19 @@ class HII_Power_Input_Processing(HIITask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.job = kwargs.get("job") or os.environ.get("job") or CALC_PREVIOUS_ANNUAL_VIIRS
+
         self.dmsp = ee.ImageCollection(
             self.inputs["dmsp_viirs_calibrated"]["ee_path"]
         ).filterDate("1992", "2013")
-
         self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
-
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
 
     def viirs_annual_image(
         self, year, viirs_collection, min_lat, max_lat, min_val, max_val
     ):
-
         year_int = ee.Number(year).int()
         year_str = year_int.format("%d")
-
         start_date = ee.Date.parse("YYYY", year_str)
         end_date = start_date.advance(1, "year")
 
@@ -92,25 +98,19 @@ class HII_Power_Input_Processing(HIITask):
         dmsp_stable = dmsp_std_dev.lte(std_dev)
         return dmsp_stable
 
-    def stable_light_points(
-        self,
-        dmsp_collection,
-        viirs_collection,
-        stable_lights_image,
-        watermask,
-        geometry,
-    ):
-        dmsp_latest = dmsp_collection.filterDate("2012", "2013").first()
+    def stable_light_points(self):
+        stable_lights = self.stable_lights_image(self.dmsp, 2)
+        dmsp_latest = self.dmsp.filterDate("2012", "2013").first()
         dmsp_stable = (
-            dmsp_latest.updateMask(stable_lights_image)
-            .updateMask(watermask)
+            dmsp_latest.updateMask(stable_lights)
+            .updateMask(self.watermask)
             .updateMask(dmsp_latest.gt(0))
             .rename("DMSP")
         )
         viirs_earliest = (
             self.viirs_annual_image(
                 2014,
-                viirs_collection,
+                self.viirs,
                 self.thresholds["latitude"]["min_lat"],
                 self.thresholds["latitude"]["max_lat"],
                 self.thresholds["latitude"]["min_val"],
@@ -124,22 +124,25 @@ class HII_Power_Input_Processing(HIITask):
 
         dmsp_class = dmsp_stable.round().int().rename("NL_CLASS")
         regression_image = dmsp_class.addBands([dmsp_stable, viirs_earliest])
+        region = ee.Geometry.Polygon(self.extent, proj=self.crs, geodesic=False)
 
-        regression_sample = regression_image.stratifiedSample(
+        return regression_image.stratifiedSample(
             numPoints=5,
             classBand="NL_CLASS",
-            region=geometry,
+            region=region,
             scale=self.scale,
             projection=self.crs,
             tileScale=16,
             dropNulls=True,
         )
 
-    def viirs_to_dmsp(self, viirs_collection, year, viirs_proj, dmsp_proj, watermask):
+    def viirs_to_dmsp(self):
+        viirs_projection = self.viirs.first().projection()
+        dmsp_projection = self.dmsp.first().projection()
         annual_viirs = (
             self.viirs_annual_image(
-                year,
-                viirs_collection,
+                self.taskdate.year,
+                self.viirs,
                 self.thresholds["latitude"]["min_lat"],
                 self.thresholds["latitude"]["max_lat"],
                 self.thresholds["latitude"]["min_val"],
@@ -149,63 +152,52 @@ class HII_Power_Input_Processing(HIITask):
             .multiply(self.calibration_coefficients["slope"])
             .add(self.calibration_coefficients["intercept"])
             .unmask(0)
-            .setDefaultProjection(viirs_proj)
+            .setDefaultProjection(viirs_projection)
             .reduceResolution(ee.Reducer.mean())
-            .reproject(dmsp_proj)
-            .updateMask(watermask)
-            .clamp(0, 63)
+            .reproject(dmsp_projection)
+            .updateMask(self.watermask)
+            .clamp(0, 63)  # TODO: why is this 63? Document
             .uint8()
             .selfMask()
         )
         return annual_viirs
 
-    def quantile_calc(self, image_collection, year, geometry):
+    def quantile_calc(self, image_collection, year):
         year_int = ee.Number(year).int()
         year_str = year_int.format("%d")
         start_date = ee.Date.parse("YYYY", year_str)
         end_date = start_date.advance(1, "year")
 
-        nighlights_year = image_collection.filterDate(start_date, end_date).first()
+        nightlights_year = image_collection.filterDate(start_date, end_date).first()
+        region = ee.Geometry.Polygon(self.extent, proj=self.crs, geodesic=False)
 
-        nightlight_quantiles = nighlights_year.reduceRegion(
+        nightlight_quantiles = nightlights_year.reduceRegion(
             reducer=ee.Reducer.percentile([10, 20, 30, 40, 50, 60, 70, 80, 90]),
-            geometry=geometry,
-            scale=500,
-            maxPixels=1e13,
+            geometry=region,
+            scale=500,  # TODO: Why 500? If this is nightlights_year resolution, can we not determine that dynamically?
+            maxPixels=self.ee_max_pixels,
             tileScale=16,
         )
 
         return nightlight_quantiles
 
     def calc(self):
-        viirs_projection = self.viirs.first().projection()
-        dmsp_projection = self.dmsp.first().projection()
-        # TODO: global bounds?
-        global_bounds = ee.Geometry.Polygon(
-            [-180, 88, 0, 88, 180, 88, 180, -88, 0, -88, -180, -88], None, False
-        )
-        stable_lights = self.stable_lights_image(self.dmsp, 2)
-        regression_points = self.stable_light_points(
-            self.dmsp, self.viirs, stable_lights, self.watermask, global_bounds
-        )
+        if self.job == CALC_PREVIOUS_ANNUAL_VIIRS:
+            calibrated_viirs = self.viirs_to_dmsp()
+            # TODO: add the export for the previous year's calibrated viirs
+            #   do this on demand like population, from HIIPower
+            #   Should be able to use self.export_image_ee
+            #   var exportString = exportYear.toString();
+            #   var id = 'projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_' + exportString + '_calDMSP';
 
-        # TODO: export the regression sample for analysis
-        # export to GCS as CSV and then bring back in to run regression in this task?
+        elif self.job == CALC_CALIBRATION_COEFFICIENTS:
+            regression_points = self.stable_light_points()
+            # TODO: Than: paste in R Kim: convert to pandas
+            #   print result
 
-        calibrated_viirs = self.viirs_to_dmsp(
-            self.viirs,
-            self.taskdate.year,
-            viirs_projection,
-            dmsp_projection,
-            self.watermask,
-        )
-        # TODO: add the export for the calibrated viirs
-        #   var exportString = exportYear.toString();
-        #   var id = 'projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_' + exportString + '_calDMSP';
-        # self.export_image_ee(hii_power_driver, "driver/power")
-
-        quantiles = self.quantile_calc(self.dmsp, 1992, global_bounds)
-        print(quantiles.getInfo())
+        elif self.job == CALC_WEIGHTING_QUANTILES:
+            quantiles = self.quantile_calc(self.dmsp, 1992)  # TODO: document why 1992 (and/or make a constant up top)
+            print(quantiles.getInfo())
 
     def check_inputs(self):
         super().check_inputs()
@@ -214,11 +206,21 @@ class HII_Power_Input_Processing(HIITask):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--taskdate")
+    # TODO: in README, document usage of this task with custom args separately and called from main task
+    parser.add_argument(
+        "-j",
+        "--job",
+        nargs="?",
+        choices=JOB_CHOICES,
+        default=CALC_PREVIOUS_ANNUAL_VIIRS,
+        const=CALC_PREVIOUS_ANNUAL_VIIRS,
+        help="Calculation to run with HIIPowerPreprocessTask.",
+    )
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="overwrite existing outputs instead of incrementing",
     )
     options = parser.parse_args()
-    power_task = HII_Power_Input_Processing(**vars(options))
+    power_task = HIIPowerPreprocessTask(**vars(options))
     power_task.run()

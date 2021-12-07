@@ -1,6 +1,5 @@
 import argparse
 import ee
-from datetime import datetime
 from task_base import HIITask
 
 
@@ -19,7 +18,7 @@ class HIIPower(HIITask):
             "static": True,
         },
     }
-    quintiles = {
+    quantiles = {
         "0": {"value": 0, "min": 0, "max": 0},
         "1": {"value": 1, "min": 1, "max": 4},
         "2": {"value": 2, "min": 5, "max": 5},
@@ -39,7 +38,7 @@ class HIIPower(HIITask):
             ee.ImageCollection(self.inputs["dmsp_viirs_calibrated"]["ee_path"])
         )
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
-        self.quintiles = ee.Dictionary(self.quintiles)
+        self.quantiles = ee.Dictionary(self.quantiles)
 
     # TODO: add code for calculating regression coeffecients used in callibration
     # TODO: add code for exporting callibrated nightlights, including noise correction for 2013 - current
@@ -47,7 +46,7 @@ class HIIPower(HIITask):
 
     def calc(self):
         def power_classify(value):
-            bin = ee.Dictionary(self.quintiles.get(value))
+            bin = ee.Dictionary(self.quantiles.get(value))
             power_value = ee.Number(bin.get("value"))
             min = ee.Number(bin.get("min"))
             max = ee.Number(bin.get("max"))
@@ -61,7 +60,7 @@ class HIIPower(HIITask):
             )
 
         hii_power_driver = (
-            ee.ImageCollection(self.quintiles.keys().map(power_classify))
+            ee.ImageCollection(self.quantiles.keys().map(power_classify))
             .reduce(ee.Reducer.max())
             .updateMask(self.watermask)
             .multiply(100)
