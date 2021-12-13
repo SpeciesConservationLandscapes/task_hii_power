@@ -51,6 +51,6 @@ Inconsistencies within the DMSP time series require implementing intra-calibrati
 
 &emsp; &emsp; &emsp; calibrated_viirs = log(viirs) x 10.53 + 24.62
 
-4. Values in the calibrated image greater than 63 are set 63.
+4. Values in the calibrated image greater than 63 are set 63, matching the range of values from DMSP.
 
 5. For the year 2012, in which both DMSP and VIIRS images are available, the final calibrated image is calculated as the mean of DMPS and VIIRS for 2012.

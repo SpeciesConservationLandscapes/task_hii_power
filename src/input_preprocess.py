@@ -158,9 +158,7 @@ class HIIPowerPreprocessTask(HIITask):
             .reduceResolution(ee.Reducer.mean())
             .reproject(dmsp_projection)
             .updateMask(self.watermask)
-            .clamp(
-                0, 63
-            )  # TODO: why is this 63? Documentvalid range of DMSP -- valid range of DMSP
+            .clamp(0, 63)
             .uint8()
             .selfMask()
         )
@@ -188,7 +186,6 @@ class HIIPowerPreprocessTask(HIITask):
         return nightlight_quantiles
 
     def calc(self):
-        print(self.scale)
         if self.job == CALC_PREVIOUS_ANNUAL_VIIRS:
             calibrated_viirs = self.viirs_to_dmsp()
 
@@ -218,9 +215,7 @@ class HIIPowerPreprocessTask(HIITask):
             """
 
         elif self.job == CALC_WEIGHTING_QUANTILES:
-            quantiles = self.quantile_calc(
-                self.dmsp, 1992
-            )  # TODO: document why 1992 (and/or make a constant up top)
+            quantiles = self.quantile_calc(self.dmsp, 1992)
             print(quantiles.getInfo())
 
     def check_inputs(self):
