@@ -19,7 +19,7 @@ class HIIPowerPreprocessTask(HIITask):
         "dmsp_viirs_calibrated": {
             "ee_type": HIITask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated",
-            "maxage": 2,
+            "static": True,
         },
         "viirs": {
             "ee_type": HIITask.IMAGECOLLECTION,
@@ -36,10 +36,7 @@ class HIIPowerPreprocessTask(HIITask):
     thresholds = {
         "latitude": {"min_lat": 0, "min_val": 0.1, "max_lat": 60, "max_val": 0.75},
     }
-    calibration_coefficients = {
-        "slope": 10.53,
-        "intercept": 24.62,
-    }
+    calibration_coefficients = {"slope": 10.53, "intercept": 24.62}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -53,13 +50,16 @@ class HIIPowerPreprocessTask(HIITask):
         self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
 
-    def viirs_annual_image(
-        self, year, viirs_collection, min_lat, max_lat, min_val, max_val
-    ):
+    def viirs_annual_image(self, year):
         year_int = ee.Number(year).int()
         year_str = year_int.format("%d")
         start_date = ee.Date.parse("YYYY", year_str)
         end_date = start_date.advance(1, "year")
+
+        min_lat = self.thresholds["latitude"]["min_lat"]
+        max_lat = self.thresholds["latitude"]["max_lat"]
+        min_val = self.thresholds["latitude"]["min_val"]
+        max_val = self.thresholds["latitude"]["max_val"]
 
         def clean_images(image):
             viirs_radiance = image.select("avg_rad")
@@ -67,7 +67,7 @@ class HIIPowerPreprocessTask(HIITask):
             return cleaned
 
         viirs_annual_median = (
-            viirs_collection.filterDate(start_date, end_date).map(clean_images).median()
+            self.viirs.filterDate(start_date, end_date).map(clean_images).median()
         )
 
         latitude = (
@@ -94,14 +94,14 @@ class HIIPowerPreprocessTask(HIITask):
         )
         return annual_viirs
 
-    def stable_lights_image(self, dmsp_collection, std_dev):
-        dmsp_recent = dmsp_collection.filterDate("2000", "2013")
+    def stable_lights_image(self, std_dev):
+        dmsp_recent = self.dmsp.filterDate("2000", "2013")
         dmsp_std_dev = dmsp_recent.reduce(ee.Reducer.stdDev())
         dmsp_stable = dmsp_std_dev.lte(std_dev)
         return dmsp_stable
 
     def stable_light_points(self):
-        stable_lights = self.stable_lights_image(self.dmsp, 2)
+        stable_lights = self.stable_lights_image(2)
         dmsp_latest = self.dmsp.filterDate("2012", "2013").first()
         dmsp_stable = (
             dmsp_latest.updateMask(stable_lights)
@@ -110,16 +110,7 @@ class HIIPowerPreprocessTask(HIITask):
             .rename("DMSP")
         )
         viirs_earliest = (
-            self.viirs_annual_image(
-                2014,
-                self.viirs,
-                self.thresholds["latitude"]["min_lat"],
-                self.thresholds["latitude"]["max_lat"],
-                self.thresholds["latitude"]["min_val"],
-                self.thresholds["latitude"]["max_val"],
-            )
-            .updateMask(dmsp_stable)
-            .rename("VIIRS")
+            self.viirs_annual_image(2014).updateMask(dmsp_stable).rename("VIIRS")
         )
 
         viirs_earliest = viirs_earliest.updateMask(viirs_earliest.gt(0))
@@ -142,14 +133,7 @@ class HIIPowerPreprocessTask(HIITask):
         viirs_projection = self.viirs.first().projection()
         dmsp_projection = self.dmsp.first().projection()
         annual_viirs = (
-            self.viirs_annual_image(
-                self.taskdate.year,
-                self.viirs,
-                self.thresholds["latitude"]["min_lat"],
-                self.thresholds["latitude"]["max_lat"],
-                self.thresholds["latitude"]["min_val"],
-                self.thresholds["latitude"]["max_val"],
-            )
+            self.viirs_annual_image(self.taskdate.year)
             .log()
             .multiply(self.calibration_coefficients["slope"])
             .add(self.calibration_coefficients["intercept"])
@@ -187,20 +171,17 @@ class HIIPowerPreprocessTask(HIITask):
 
     def calc(self):
         if self.job == CALC_PREVIOUS_ANNUAL_VIIRS:
+            # Running this task for any date in (e.g.) 2020 -- even 2020-01-01 -- will produce
+            # an annual calibrated_viirs from 2020-01-01 through 2020-12-31
+            exportpath = "source/nightlights/dmsp_viirs_calibrated"
             calibrated_viirs = self.viirs_to_dmsp()
-
-            self.export_image_ee(calibrated_viirs, "")  # what path to use?
-            # TODO: add the export for the previous year's calibrated viirs
-            #   do this on demand like population, from HIIPower
-            #   Should be able to use self.export_image_ee
-            #   var exportString = exportYear.toString();
-            #   var id = 'projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_' + exportString + '_calDMSP';
+            self.export_image_ee(calibrated_viirs, exportpath, self.taskdate.year)
 
         elif self.job == CALC_CALIBRATION_COEFFICIENTS:
             regression_points = self.stable_light_points()
-            # R-Code for Regression Calculations
+            # TODO: operationalize in pandas this R code for calculating regression coefficients
             """
-            regression_points = regressio_points[
+            regression_points = regression_points[
                 which(regression_points$VIIRS>0 &
                 regression_points$DMSP>0),
             ]
