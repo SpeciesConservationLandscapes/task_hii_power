@@ -19,7 +19,7 @@ class HIIPowerPreprocessTask(HIITask):
         "dmsp_viirs_calibrated": {
             "ee_type": HIITask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated",
-            "maxage": 1,
+            "maxage": 2,
         },
         "viirs": {
             "ee_type": HIITask.IMAGECOLLECTION,
@@ -43,7 +43,9 @@ class HIIPowerPreprocessTask(HIITask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.job = kwargs.get("job") or os.environ.get("job") or CALC_PREVIOUS_ANNUAL_VIIRS
+        self.job = (
+            kwargs.get("job") or os.environ.get("job") or CALC_PREVIOUS_ANNUAL_VIIRS
+        )
 
         self.dmsp = ee.ImageCollection(
             self.inputs["dmsp_viirs_calibrated"]["ee_path"]
@@ -156,7 +158,9 @@ class HIIPowerPreprocessTask(HIITask):
             .reduceResolution(ee.Reducer.mean())
             .reproject(dmsp_projection)
             .updateMask(self.watermask)
-            .clamp(0, 63)  # TODO: why is this 63? Document
+            .clamp(
+                0, 63
+            )  # TODO: why is this 63? Documentvalid range of DMSP -- valid range of DMSP
             .uint8()
             .selfMask()
         )
@@ -170,11 +174,13 @@ class HIIPowerPreprocessTask(HIITask):
 
         nightlights_year = image_collection.filterDate(start_date, end_date).first()
         region = ee.Geometry.Polygon(self.extent, proj=self.crs, geodesic=False)
-
+        projection = image_collection.projection()
+        scale = projection.nominalScale()
         nightlight_quantiles = nightlights_year.reduceRegion(
             reducer=ee.Reducer.percentile([10, 20, 30, 40, 50, 60, 70, 80, 90]),
             geometry=region,
-            scale=500,  # TODO: Why 500? If this is nightlights_year resolution, can we not determine that dynamically?
+            crs=projection,
+            scale=scale,
             maxPixels=self.ee_max_pixels,
             tileScale=16,
         )
@@ -182,8 +188,11 @@ class HIIPowerPreprocessTask(HIITask):
         return nightlight_quantiles
 
     def calc(self):
+        print(self.scale)
         if self.job == CALC_PREVIOUS_ANNUAL_VIIRS:
             calibrated_viirs = self.viirs_to_dmsp()
+
+            self.export_image_ee(calibrated_viirs, "")  # what path to use?
             # TODO: add the export for the previous year's calibrated viirs
             #   do this on demand like population, from HIIPower
             #   Should be able to use self.export_image_ee
@@ -192,11 +201,26 @@ class HIIPowerPreprocessTask(HIITask):
 
         elif self.job == CALC_CALIBRATION_COEFFICIENTS:
             regression_points = self.stable_light_points()
-            # TODO: Than: paste in R Kim: convert to pandas
-            #   print result
+            # R-Code for Regression Calculations
+            """
+            regression_points = regressio_points[
+                which(regression_points$VIIRS>0 &
+                regression_points$DMSP>0),
+            ]
+
+            regression = lm(regression_points$DMSP ~ log(regression_points$VIIRS))
+
+            slope = regression$coefficients[1]
+            intercept = regression$coefficients[1]
+            r2 = summary(regression)[8]
+            r2_adj = summary(regression)[9]
+            print('slope: ', slope, '\n intercept: ', intercept, '\n r2: ', r2, '\n r2_adj: ', r2_adj)
+            """
 
         elif self.job == CALC_WEIGHTING_QUANTILES:
-            quantiles = self.quantile_calc(self.dmsp, 1992)  # TODO: document why 1992 (and/or make a constant up top)
+            quantiles = self.quantile_calc(
+                self.dmsp, 1992
+            )  # TODO: document why 1992 (and/or make a constant up top)
             print(quantiles.getInfo())
 
     def check_inputs(self):
