@@ -90,7 +90,7 @@ class HIIPowerPreprocessTask(HIITask):
         annual_viirs = (
             annual_viirs.updateMask(latitude_threshold_mask)
             .rename("viirs")
-            .set({"system:time_start": start_date.millis()})
+            .set({self.ASSET_TIMESTAMP_PROPERTY: start_date.millis()})
         )
         return annual_viirs
 
