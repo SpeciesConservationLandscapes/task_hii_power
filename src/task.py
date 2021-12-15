@@ -1,6 +1,6 @@
 import argparse
 import ee
-from datetime import datetime
+from datetime import date
 from task_base import HIITask
 from input_preprocess import HIIPowerPreprocessTask
 
@@ -55,15 +55,12 @@ class HIIPower(HIITask):
                 return nightlights
 
         # otherwise calculate calibrated viirs for previous year, Jan 1 - Dec 31
-        print(f"calc calibrated lights for {self.taskdate.year - 1}")
-        lastyearviirsdate = datetime(
-            year=self.taskdate.year - 1, month=12, day=31
-        ).strftime(self.DATE_FORMAT)
+        prevyear = self.taskdate.year - 1
+        print(f"calc calibrated lights for {prevyear}")
+        lastyearviirsdate = date(year=prevyear, month=12, day=31).isoformat()
         calibrated_viirs_task = HIIPowerPreprocessTask(taskdate=lastyearviirsdate)
         calibrated_viirs_task.run()
-        nightlights, _ = self.get_most_recent_image(
-            ee.ImageCollection(self.inputs["dmsp_viirs_calibrated"]["ee_path"])
-        )
+        nightlights, _ = self.get_most_recent_image(nightlights_ic)
         return nightlights
 
     def calc(self):

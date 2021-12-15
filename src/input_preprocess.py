@@ -1,9 +1,16 @@
 import argparse
 import ee
 import os
+import numpy as np
+import pandas as pd
+import uuid
+from datetime import date
+from pathlib import Path
+from sklearn.linear_model import LinearRegression
 from task_base import HIITask
 
 
+BUCKET = "hii-scratch"
 CALC_PREVIOUS_ANNUAL_VIIRS = "viirs"
 CALC_CALIBRATION_COEFFICIENTS = "coefficients"
 CALC_WEIGHTING_QUANTILES = "quantiles"
@@ -36,7 +43,7 @@ class HIIPowerPreprocessTask(HIITask):
     thresholds = {
         "latitude": {"min_lat": 0, "min_val": 0.1, "max_lat": 60, "max_val": 0.75},
     }
-    calibration_coefficients = {"slope": 10.53, "intercept": 24.62}
+    calibration_coefficients = {"slope": 11.62, "intercept": 19.4}  # R2: 67.16
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -49,13 +56,29 @@ class HIIPowerPreprocessTask(HIITask):
         ).filterDate("1992", "2013")
         self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
+        self.fc_csvs = []
+
+    def fc2df(self, featurecollection, columns=None):
+        tempfile = str(uuid.uuid4())
+        blob = f"{self.taskdate}/{tempfile}"
+        task_id = self.table2storage(featurecollection, BUCKET, blob, "CSV", columns)
+        self.wait()
+        csv = self.download_from_cloudstorage(f"{blob}.csv", f"{tempfile}.csv", BUCKET)
+        self.fc_csvs.append((f"{tempfile}.csv", None))
+
+        # uncomment to export for QA in a GIS
+        # shp_task_id = self.table2storage(
+        #     featurecollection, BUCKET, blob, "GeoJSON", columns
+        # )
+
+        df = pd.read_csv(csv)
+        self.remove_from_cloudstorage(f"{blob}.csv", bucketname=BUCKET)
+        return df
 
     def viirs_annual_image(self, year):
-        year_int = ee.Number(year).int()
-        year_str = year_int.format("%d")
-        start_date = ee.Date.parse("YYYY", year_str)
+        jan1 = date(year=year, month=1, day=1)
+        start_date = ee.Date(jan1.isoformat())
         end_date = start_date.advance(1, "year")
-
         min_lat = self.thresholds["latitude"]["min_lat"]
         max_lat = self.thresholds["latitude"]["max_lat"]
         min_val = self.thresholds["latitude"]["min_val"]
@@ -102,7 +125,9 @@ class HIIPowerPreprocessTask(HIITask):
 
     def stable_light_points(self):
         stable_lights = self.stable_lights_image(2)
-        dmsp_latest = self.dmsp.filterDate("2012", "2013").first()
+        dmsp_latest = ee.Image(
+            "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated/Harmonized_DN_NTL_2013_calDMSP"
+        )
         dmsp_stable = (
             dmsp_latest.updateMask(stable_lights)
             .updateMask(self.watermask)
@@ -112,7 +137,6 @@ class HIIPowerPreprocessTask(HIITask):
         viirs_earliest = (
             self.viirs_annual_image(2014).updateMask(dmsp_stable).rename("VIIRS")
         )
-
         viirs_earliest = viirs_earliest.updateMask(viirs_earliest.gt(0))
 
         dmsp_class = dmsp_stable.round().int().rename("NL_CLASS")
@@ -120,13 +144,14 @@ class HIIPowerPreprocessTask(HIITask):
         region = ee.Geometry.Polygon(self.extent, proj=self.crs, geodesic=False)
 
         return regression_image.stratifiedSample(
-            numPoints=5,
+            numPoints=300,
             classBand="NL_CLASS",
             region=region,
             scale=self.scale,
             projection=self.crs,
             tileScale=16,
             dropNulls=True,
+            # geometries=True
         )
 
     def viirs_to_dmsp(self):
@@ -149,14 +174,18 @@ class HIIPowerPreprocessTask(HIITask):
         return annual_viirs
 
     def quantile_calc(self, image_collection, year):
-        year_int = ee.Number(year).int()
-        year_str = year_int.format("%d")
-        start_date = ee.Date.parse("YYYY", year_str)
+        jan1 = date(year=year, month=1, day=1)
+        start_date = ee.Date(jan1.isoformat())
         end_date = start_date.advance(1, "year")
 
-        nightlights_year = image_collection.filterDate(start_date, end_date).first()
+        nightlights_year = (
+            image_collection.filterDate(start_date, end_date)
+            .first()
+            .updateMask(self.watermask)
+            .selfMask()
+        )
         region = ee.Geometry.Polygon(self.extent, proj=self.crs, geodesic=False)
-        projection = image_collection.projection()
+        projection = nightlights_year.projection()
         scale = projection.nominalScale()
         nightlight_quantiles = nightlights_year.reduceRegion(
             reducer=ee.Reducer.percentile([10, 20, 30, 40, 50, 60, 70, 80, 90]),
@@ -170,6 +199,7 @@ class HIIPowerPreprocessTask(HIITask):
         return nightlight_quantiles
 
     def calc(self):
+        # Calculate and store calibrated VIIRS for use by HIIPower task
         if self.job == CALC_PREVIOUS_ANNUAL_VIIRS:
             # Running this task for any date in (e.g.) 2020 -- even 2020-01-01 -- will produce
             # an annual calibrated_viirs from 2020-01-01 through 2020-12-31
@@ -177,30 +207,39 @@ class HIIPowerPreprocessTask(HIITask):
             calibrated_viirs = self.viirs_to_dmsp()
             self.export_image_ee(calibrated_viirs, exportpath, self.taskdate.year)
 
+        # Calculate values for self.calibration_coefficients constants
         elif self.job == CALC_CALIBRATION_COEFFICIENTS:
             regression_points = self.stable_light_points()
-            # TODO: operationalize in pandas this R code for calculating regression coefficients
-            """
-            regression_points = regression_points[
-                which(regression_points$VIIRS>0 &
-                regression_points$DMSP>0),
-            ]
+            # Get `Computation timed out.` doing this with geometries=True in the stratifiedSample above
+            # self.export_fc_ee(regression_points, "source/nightlights/calibration_points")
+            df_regression_points = self.fc2df(regression_points)
+            df_regression_points.to_csv("regression_points.csv")
 
-            regression = lm(regression_points$DMSP ~ log(regression_points$VIIRS))
+            # dropna and filtering for 0 unnecessary because of ee filtering
+            dmsp = df_regression_points["DMSP"].values.reshape(-1, 1)
+            viirs = np.log(df_regression_points["VIIRS"].values.reshape(-1, 1))
+            regression = LinearRegression().fit(viirs, dmsp)
+            slope = round(regression.coef_[0][0], 2)
+            intercept = round(regression.intercept_[0], 2)
+            r2 = round(100 * regression.score(viirs, dmsp), 2)
+            print(f"slope: {slope} intercept: {intercept} R2: {r2}")
 
-            slope = regression$coefficients[1]
-            intercept = regression$coefficients[1]
-            r2 = summary(regression)[8]
-            r2_adj = summary(regression)[9]
-            print('slope: ', slope, '\n intercept: ', intercept, '\n r2: ', r2, '\n r2_adj: ', r2_adj)
-            """
-
+        # Calculate values for HIIPower.quantiles constants
         elif self.job == CALC_WEIGHTING_QUANTILES:
             quantiles = self.quantile_calc(self.dmsp, 1992)
             print(quantiles.getInfo())
 
     def check_inputs(self):
         super().check_inputs()
+
+    def clean_up(self, **kwargs):
+        if self.status == self.FAILED:
+            return
+
+        if self.fc_csvs:
+            for csv, table_asset_id in self.fc_csvs:
+                if csv and Path(csv).exists():
+                    Path(csv).unlink()
 
 
 if __name__ == "__main__":

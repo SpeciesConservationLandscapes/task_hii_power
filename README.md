@@ -48,10 +48,9 @@ Inconsistencies within the DMSP time series require implementing intra-calibrati
 
 ### Calibration steps
 
-3. Regression coefficients are calculated to convert VIIRS values to DMSP values by comparing pixel values of areas with stable lights through time. These are determined statically by selecting pixels from the DMSP time series from 2000 - 2012 that have a standard deviation less than 2. A stratified sample of 200 pixel values for each available DMSP value is calculated. See the `stable_light_points` function in `input_preprocess.py`.
-4. The resulting equation to transform VIIRS values to match DMSP is determined to be:  
-&emsp; &emsp; &emsp; calibrated_viirs = log(viirs) x 10.53 + 24.62
-5. Values in the calibrated image greater than 63 are set 63, matching the range of values from DMSP.
-6. For the year 2012, in which both DMSP and VIIRS images are available, the final calibrated image is calculated as the mean of DMPS and VIIRS for 2012.
+1. Regression coefficients are calculated to convert VIIRS values (beginning with 2014) to DMSP values by comparing pixel values of areas with stable lights through time. These are determined statically by selecting pixels from the DMSP time series from 2000 - 2013 that have a standard deviation less than 2. A stratified sample of 300 pixel values for each available DMSP value as of the latest available image (2013) is calculated and used to derive constant slope and intercept coefficients. See the `stable_light_points` function in `input_preprocess.py`.
+2. The resulting equation to transform VIIRS values to match DMSP is determined to be:  
+&emsp; &emsp; &emsp; calibrated_viirs = log(viirs) * 11.62 + 19.4 [R<sup>2</sup>: 67.16]
+3. Values in the calibrated image greater than 63 are set 63, matching the range of values from DMSP.
 
 The result and goal is an annual night lights dataset derived from VIIRS that is calibrated to the pre-2013 DMSP values, which is then transformed into the HII power driver by the main task.
