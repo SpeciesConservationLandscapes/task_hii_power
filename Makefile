@@ -8,7 +8,7 @@ run:
 	docker run --rm -it --env-file .env -v `pwd`/src:/app -v `pwd`/.git:/app/.git $(IMAGE) python task.py
 
 shell:
-	docker run -it --env-file .env -v `pwd`/src:/app -v `pwd`/.git:/app/.git $(IMAGE) sh
+	docker run -it --env-file .env -v `pwd`/src:/app -v `pwd`/.git:/app/.git $(IMAGE) bash
 
 cleanup:
 	isort `pwd`/src/*.py

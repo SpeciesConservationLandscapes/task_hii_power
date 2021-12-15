@@ -1,12 +1,11 @@
 import argparse
 import ee
-from datetime import datetime
+from datetime import date
 from task_base import HIITask
+from input_preprocess import HIIPowerPreprocessTask
 
 
 class HIIPower(HIITask):
-    scale = 300
-
     inputs = {
         "dmsp_viirs_calibrated": {
             "ee_type": HIITask.IMAGECOLLECTION,
@@ -19,7 +18,7 @@ class HIIPower(HIITask):
             "static": True,
         },
     }
-    quintiles = {
+    quantiles = {
         "0": {"value": 0, "min": 0, "max": 0},
         "1": {"value": 1, "min": 1, "max": 4},
         "2": {"value": 2, "min": 5, "max": 5},
@@ -35,19 +34,38 @@ class HIIPower(HIITask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.nightlights, _ = self.get_most_recent_image(
-            ee.ImageCollection(self.inputs["dmsp_viirs_calibrated"]["ee_path"])
-        )
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
-        self.quintiles = ee.Dictionary(self.quintiles)
+        self.quantiles = ee.Dictionary(self.quantiles)
 
-    # TODO: add code for calculating regression coeffecients used in callibration
-    # TODO: add code for exporting callibrated nightlights, including noise correction for 2013 - current
-    # TODO: include method for checking if nightlight image is available and export if not
+    @property
+    def nightlights(self):
+        # If nightlights for previous year has already been calculated and stored, use it
+        nightlights_ic = ee.ImageCollection(
+            self.inputs["dmsp_viirs_calibrated"]["ee_path"]
+        )
+        nightlights, _ = self.get_most_recent_image(nightlights_ic)
+        if nightlights:
+            taskyear = self.taskdate.year
+            nightlightsyear = _.get("year").getInfo()
+            if (
+                0
+                <= (taskyear - nightlightsyear)
+                <= self.inputs["dmsp_viirs_calibrated"]["maxage"]
+            ):
+                return nightlights
+
+        # otherwise calculate calibrated viirs for previous year, Jan 1 - Dec 31
+        prevyear = self.taskdate.year - 1
+        print(f"calc calibrated lights for {prevyear}")
+        lastyearviirsdate = date(year=prevyear, month=12, day=31).isoformat()
+        calibrated_viirs_task = HIIPowerPreprocessTask(taskdate=lastyearviirsdate)
+        calibrated_viirs_task.run()
+        nightlights, _ = self.get_most_recent_image(nightlights_ic)
+        return nightlights
 
     def calc(self):
         def power_classify(value):
-            bin = ee.Dictionary(self.quintiles.get(value))
+            bin = ee.Dictionary(self.quantiles.get(value))
             power_value = ee.Number(bin.get("value"))
             min = ee.Number(bin.get("min"))
             max = ee.Number(bin.get("max"))
@@ -61,7 +79,7 @@ class HIIPower(HIITask):
             )
 
         hii_power_driver = (
-            ee.ImageCollection(self.quintiles.keys().map(power_classify))
+            ee.ImageCollection(self.quantiles.keys().map(power_classify))
             .reduce(ee.Reducer.max())
             .updateMask(self.watermask)
             .multiply(100)
@@ -72,6 +90,7 @@ class HIIPower(HIITask):
         self.export_image_ee(hii_power_driver, "driver/power")
 
     def check_inputs(self):
+        previousyear_nightlights = self.nightlights  # trigger calculation if necessary
         super().check_inputs()
 
 
