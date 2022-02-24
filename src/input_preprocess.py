@@ -33,11 +33,6 @@ class HIIPowerPreprocessTask(HIITask):
             "ee_path": "NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG",
             "maxage": 1,
         },
-        "watermask": {
-            "ee_type": HIITask.IMAGE,
-            "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True,
-        },
     }
 
     thresholds = {
