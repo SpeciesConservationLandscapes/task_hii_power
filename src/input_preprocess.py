@@ -33,11 +33,6 @@ class HIIPowerPreprocessTask(HIITask):
             "ee_path": "NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG",
             "maxage": 1,
         },
-        "watermask": {
-            "ee_type": HIITask.IMAGE,
-            "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True,
-        },
     }
 
     thresholds = {
@@ -55,7 +50,6 @@ class HIIPowerPreprocessTask(HIITask):
             self.inputs["dmsp_viirs_calibrated"]["ee_path"]
         ).filterDate("1992", "2013")
         self.viirs = ee.ImageCollection(self.inputs["viirs"]["ee_path"])
-        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.fc_csvs = []
 
     def fc2df(self, featurecollection, columns=None):

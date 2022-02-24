@@ -12,11 +12,6 @@ class HIIPower(HIITask):
             "ee_path": "projects/HII/v1/source/nightlights/dmsp_viirs_calibrated",
             "maxage": 1,
         },
-        "watermask": {
-            "ee_type": HIITask.IMAGE,
-            "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True,
-        },
     }
     quantiles = {
         "0": {"value": 0, "min": 0, "max": 0},
@@ -34,7 +29,6 @@ class HIIPower(HIITask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.quantiles = ee.Dictionary(self.quantiles)
 
     @property
