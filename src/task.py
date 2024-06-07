@@ -6,6 +6,7 @@ from input_preprocess import HIIPowerPreprocessTask
 
 
 class HIIPower(HIITask):
+    VIIRS_START = 2013
     inputs = {
         "nightlights": {
             "ee_type": HIITask.IMAGECOLLECTION,
@@ -41,7 +42,7 @@ class HIIPower(HIITask):
         self.quantiles = ee.Dictionary(self.quantiles)
 
     def nightlights_path(self):
-        if self.taskdate.year < 2013:
+        if self.taskdate.year < self.VIIRS_START:
             return "projects/sat-io/open-datasets/Harmonized_NTL/dmsp"
         else:
             return "projects/sat-io/open-datasets/Harmonized_NTL/viirs"
@@ -70,7 +71,7 @@ class HIIPower(HIITask):
         return latitude_threshold_image
 
     def calc(self):
-        if self.taskdate.year < 2013:
+        if self.taskdate.year < self.VIIRS_START:
             self.nightlights = self.nightlights.updateMask(
                 self.nightlights.gte(self.thresholds["global"])
             )
